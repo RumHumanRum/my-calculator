@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>四則運算計算機</title>
+<style>
+  /* 顏色變數：淺色模式 */
+  :root {
+    /* Cyberpunk 配色：深藍黑底 + 亮橘主色 + 霓虹青、粉紅點綴 */
+    --bg: #0a0a12; --panel: #12121f; --text: #e8f6ff;
+    --num: #1d1d33; --op: #ff8a1f; --op-text: #0a0a12;
+    --clear: #ff2e63; --eq: #00e5ff; --btn-text-light: #0a0a12;
+    --sub: #7a86b8; color-scheme: dark;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  /* 本版固定使用暗色 cyberpunk 風格，不再切換淺色 */
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    display: flex; justify-content: center; padding: 16px;
+  }
+  .calc {
+    width: 100%; max-width: 380px; background: var(--panel);
+    border-radius: 20px; padding: 16px;
+    border: 1px solid #ff8a1f66; box-shadow: 0 0 28px rgba(255,138,31,.25);
+  }
+  h1 { font-size: 22px; margin: 0 0 12px; text-align: center; color: var(--op); letter-spacing: 4px; text-shadow: 0 0 10px rgba(255,138,31,.7); }
+  /* 螢幕：上面顯示算式，下面顯示結果 */
+  .screen {
+    background: var(--bg); border-radius: 12px; padding: 12px 16px;
+    margin-bottom: 14px; text-align: right; min-height: 90px;
+    display: flex; flex-direction: column; justify-content: flex-end;
+    overflow-x: auto;
+  }
+  .expr { font-size: 22px; color: var(--sub); min-height: 28px; word-break: break-all; }
+  .result { font-size: 44px; font-weight: 700; word-break: break-all; color: var(--op); text-shadow: 0 0 12px rgba(255,138,31,.7); }
+  /* C / CE 功能說明 */
+  .hint { font-size: 16px; color: var(--sub); text-align: center; margin-bottom: 10px; }
+  /* 按鈕排成 4 欄 */
+  .keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  button {
+    font-size: 30px; font-weight: 700; padding: 18px 0; border: 1px solid #2c2c4d;
+    border-radius: 14px; background: var(--num); color: var(--text);
+    cursor: pointer; font-family: inherit;
+  }
+  button:active { transform: scale(.95); }
+  button.op { background: var(--op); color: var(--op-text); border-color: var(--op); box-shadow: 0 0 12px rgba(255,138,31,.55); }
+  button.clear { background: var(--clear); color: var(--btn-text-light); grid-column: span 2; }
+  button.ce { background: transparent; color: var(--clear); border-color: var(--clear); grid-column: span 2; }
+  button.zero { grid-column: span 2; }
+  button.eq { background: var(--eq); color: var(--btn-text-light); grid-column: span 4; border-color: var(--eq); box-shadow: 0 0 14px rgba(0,229,255,.6); }
+</style>
+</head>
+<body>
+<div class="calc">
+  <h1>四則運算計算機</h1>
+
+  <!-- 顯示區 -->
+  <div class="screen">
+    <div class="expr" id="expr"></div>
+    <div class="result" id="result">0</div>
+  </div>
+
+  <div class="hint">C＝全部清除　CE＝只清除目前輸入的數字</div>
+
+  <!-- 按鈕區 -->
+  <div class="keys">
+    <!-- C：全部清除；CE：只清除目前輸入的數字 -->
+    <button class="clear" data-k="C">C</button><button class="ce" data-k="CE">CE</button>
+    <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button><button class="op" data-k="÷">÷</button>
+    <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button><button class="op" data-k="×">×</button>
+    <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button><button class="op" data-k="−">−</button>
+    <button class="zero" data-k="0">0</button><button data-k=".">.</button><button class="op" data-k="+">+</button>
+    <button class="eq" data-k="=">=</button>
+  </div>
+</div>
+
+<script>
+  // 狀態：expr 是目前的算式字串，justEvaluated 表示剛按過等於
+  let expr = "";
+  let justEvaluated = false;
+  let lastEq = "";      // 上一次完成的算式（例如「12+3 =」）
+  let showEq = false;   // 是否在上方顯示完成的算式
+
+  const exprEl = document.getElementById("expr");
+  const resultEl = document.getElementById("result");
+  const isOp = (c) => "+−×÷".includes(c);
+
+  // 更新畫面
+  function render(result) {
+    exprEl.textContent = showEq ? lastEq : expr;
+    resultEl.textContent = result;
+  }
+
+  // 計算算式：先把符號換成程式用的符號，並檢查只含數字與運算符號
+  function calculate(s) {
+    const code = s.replace(/×/g, "*").replace(/÷/g, "/").replace(/−/g, "-");
+    if (!/^[0-9+\-*/.]+$/.test(code)) throw new Error("格式錯誤");
+    const v = Function('"use strict"; return (' + code + ')')();
+    if (!isFinite(v)) throw new Error("不能除以 0");
+    return Math.round(v * 1e10) / 1e10; // 避免 0.1+0.2 的浮點誤差
+  }
+
+  // 按下按鈕的處理
+  function press(k) {
+    // C（全部清除）：算式、結果、上一次完成的算式全部歸零
+    if (k === "C") { expr = ""; lastEq = ""; showEq = false; justEvaluated = false; render("0"); return; }
+
+    // CE（清除輸入）：只清掉正在輸入的那個數字，前面的算式與運算符號都保留
+    if (k === "CE") {
+      if (justEvaluated) {
+        // 剛按過等於：只把結果歸零，上方完成的算式仍保留
+        expr = ""; justEvaluated = false; render("0"); return;
+      }
+      expr = expr.replace(/[0-9.]+$/, ""); // 只刪掉結尾的數字
+      render("0");
+      return;
+    }
+
+    if (k === "=") {
+      if (!expr || isOp(expr.slice(-1))) return; // 算式不完整就不算
+      try {
+        const r = calculate(expr);
+        lastEq = expr + " =";  // 記下完成的算式
+        expr = String(r);      // 結果可繼續往下算
+        justEvaluated = true;
+        showEq = true;
+        render(String(r));
+      } catch (e) {
+        expr = ""; justEvaluated = false; showEq = false;
+        render(e.message);
+      }
+      return;
+    }
+
+    if (isOp(k)) {
+      if (!expr) { showEq = false; if (k === "−") expr = "−"; render(expr || "0"); return; } // 開頭只允許負號
+      if (isOp(expr.slice(-1))) expr = expr.slice(0, -1); // 連按運算符號 → 取代前一個
+      expr += k;
+      justEvaluated = false;
+    } else {
+      // 剛算完後直接輸入數字 → 開始新算式
+      if (justEvaluated) { expr = ""; justEvaluated = false; }
+      if (k === ".") {
+        // 同一個數字不能有兩個小數點
+        const last = expr.split(/[+−×÷]/).pop();
+        if (last.includes(".")) return;
+        if (last === "") expr += "0";
+      }
+      expr += k;
+    }
+    showEq = false;
+    render(expr.split(/[+−×÷]/).pop() || "0"); // 結果區顯示目前輸入的數字
+  }
+
+  // 綁定所有按鈕
+  document.querySelectorAll("button").forEach((b) =>
+    b.addEventListener("click", () => press(b.dataset.k))
+  );
+</script>
+</body>
+</html>
